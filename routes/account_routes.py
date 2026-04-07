@@ -223,7 +223,7 @@ async def add_performance_month(summary: AddSummary):
                 if not found:
                     return JSONResponse({
                         "Error": "summary_id not found"
-                    }, status_code=404)
+                    }, status_code=400)
 
             else:
                 # =========================
@@ -268,11 +268,10 @@ async def add_performance_month(summary: AddSummary):
                 "$set": updated_data,
                 "$setOnInsert": {"created_at": datetime.now(timezone.utc)}
             },
-            upsert=True
+            #upsert=True
         )
 
-        
-
+    
         return JSONResponse({
             "Success": "Data updated successfully"
         }, status_code=200)
