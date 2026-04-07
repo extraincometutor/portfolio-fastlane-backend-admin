@@ -6,101 +6,72 @@ from fastapi.responses import JSONResponse
 from database import summary_trading_collection
 from utils.serialization import fix_id
 import uuid
+from models.trades import TradeCreate, TradeDelete, TradeUpdate,AccountRequest
+
+
+
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
 
 
-# =========================
-# 🔹 MODELS
-# =========================
-class TradeCreate(BaseModel):
-    account_id: str
-    trade_id: Optional[str] = None   # pass to EDIT an existing trade; omit to INSERT new
-    date: Optional[str] = None       # if omitted, defaults to today
-    type: str
-    symbol: str
-    lot_size: float
-    open_price: float
-    close_price: float
-    swap: Optional[float] = 0.0
-    profit_loss: float
 
-
-class Trade(BaseModel):
-    date: str
-    type: str
-    symbol: str
-    lot_size: float
-    open: float
-    close: float
-    swap: Optional[float] = 0
-    pnl: float
-
-
-class TradingData(BaseModel):
-    account_id: str
-    capital: float
-    trades: List[Trade]
-    #summary: Optional[dict] = None
-
-
-class TradeDelete(BaseModel):
-    account_id: str
-    date: str
-    symbol: str
-
-
-# =========================
-# 🔥 CREATE FULL TRADING DATA
-# =========================
 @router.post("/create_trading_data")
-async def create_trading_data(payload: TradingData):
+async def create_trading_data(payload: TradeCreate):
     try:
         data = payload.dict()
 
-        # ✅ Validate account_id
         if not data.get("account_id"):
-            return JSONResponse({
-                "Error": "account_id is required"
-            }, status_code=400)
+            return JSONResponse({"error": "account_id is required"}, status_code=400)
 
-        # ✅ Filter trades safely
+        capital = float(data.get("capital", 0))
+        raw_trades = data.get("trades", [])
+
         trades = [
-            t for t in data.get("trades", [])
+            t for t in raw_trades
             if t.get("symbol") and t.get("symbol") != "string"
         ]
 
-        # ✅ Sort safely
+        # =========================
+        # 🟢 EMPTY CASE
+        # =========================
+        if not trades:
+            final_data = {
+                "account_id": data["account_id"],
+                "trades": [],
+                "chart": [],
+                "created_at": datetime.now(timezone.utc)
+               
+            }
+
+            await summary_trading_collection.update_one(
+                {"account_id": data["account_id"]},
+                {"$set": final_data},
+                upsert=True
+            )
+
+            saved_data = await summary_trading_collection.find_one({
+                "account_id": data["account_id"]
+            })
+
+            return JSONResponse({
+                "Success": "Empty trading data created"
+            }, status_code=200)
+
+        # =========================
+        # 🔽 SORT
+        # =========================
         trades = sorted(trades, key=lambda x: x.get("date", ""))
 
-        # ✅ Assign trade_id
+        # =========================
+        # 🆔 TRADE ID
+        # =========================
         for t in trades:
             if not t.get("trade_id"):
                 t["trade_id"] = "TRD-" + uuid.uuid4().hex[:8].upper()
 
-        capital = data.get("capital", 0)
-
-        # ✅ Summary calculation
-        total_pnl = 0
-        total_swap = 0
-        winning_trades = 0
-        losing_trades = 0
-
-        for t in trades:
-            pnl = float(t.get("pnl", 0))
-            swap = float(t.get("swap", 0))
-
-            total_pnl += pnl
-            total_swap += swap
-
-            if pnl > 0:
-                winning_trades += 1
-            elif pnl < 0:
-                losing_trades += 1
-
-        total_trades = len(trades)
-
-        # ✅ Chart calculation
+        # =========================
+        # 📈 CHART
+        # =========================
         running_pnl = 0
         chart = []
 
@@ -113,45 +84,30 @@ async def create_trading_data(payload: TradingData):
                 "return": round(return_percent, 2)
             })
 
+        # =========================
+        # 💾 SAVE
+        # =========================
         final_data = {
             "account_id": data["account_id"],
-            "capital": capital,
             "trades": trades,
             "chart": chart,
-            "summary": {
-                "total_pnl": round(total_pnl, 2),
-                "total_swap": round(total_swap, 2),
-                "total_trades": total_trades,
-                "winning_trades": winning_trades,
-                "losing_trades": losing_trades
-            },
-            "created_at": datetime.now(timezone.utc),
-            "updated_at": datetime.now(timezone.utc)
+            "created_at": datetime.now(timezone.utc)
+            
         }
 
-        # ✅ Insert / Replace
-        result = await summary_trading_collection.replace_one(
+        await summary_trading_collection.update_one(
             {"account_id": data["account_id"]},
-            final_data,
+            {"$set": final_data},
             upsert=True
         )
 
-        print("Mongo result:", result.raw_result)
-
-        saved_data = await summary_trading_collection.find_one(
-            {"account_id": data["account_id"]}
-        )
-
+      
         return JSONResponse({
-            "Success": "Trading data created/replaced successfully",
-            "data": fix_id(saved_data)
+            "Success": "Trading data stored successfully"
         }, status_code=200)
 
     except Exception as e:
-        print("ERROR:", str(e))  
-        return JSONResponse({
-            "Error": str(e)
-        }, status_code=500)
+        return JSONResponse({"Error": str(e)}, status_code=500)
 
 
 
@@ -160,11 +116,11 @@ async def create_trading_data(payload: TradingData):
 # 🔹 ADD / UPDATE SINGLE TRADE
 # =========================
 @router.post("/update_trading_summary")
-async def update_trading_summary(data: TradeCreate):
+async def update_trading_summary(data: TradeUpdate):
     try:
         trade = data.dict()
         trade_date = trade.get("date") or datetime.now().strftime("%Y-%m-%d")
-        incoming_trade_id = trade.get("trade_id")  # present = edit, absent = new
+        incoming_trade_id = trade.get("trade_id")
 
         # Fetch existing document
         existing = await summary_trading_collection.find_one(
@@ -177,75 +133,99 @@ async def update_trading_summary(data: TradeCreate):
         else:
             trades = []
             capital = 0
+        
 
+        previous_cum_profit = 0
+
+        if existing and existing.get("trades"):
+
+            last_trade = existing["trades"][-1]
+            previous_cum_profit = last_trade.get("cum_profit", 0)
+
+        # Current pnl
+        current_pnl = trade["profit_loss"]
+
+        # Calculate cumulative profit
+        cum_profit = previous_cum_profit + current_pnl
+        trade["cum_profit"] = cum_profit    
+
+
+
+        # =========================
+        # ✅ COMMON TRADE OBJECT
+        # =========================
+        trade_data = {
+            "trade_id": incoming_trade_id if incoming_trade_id else "TRD-" + uuid.uuid4().hex[:8].upper(),
+            "date": trade_date,
+            "type": trade["type"],
+            "symbol": trade["symbol"],
+            "lot_size": trade["lot_size"],
+            "open": trade["open_price"],
+            "close": trade["close_price"],
+            "swap": trade.get("swap", 0),
+            "pnl": trade["profit_loss"],
+            "max_drawdown": trade.get("max_drawdown", 0),
+            "cumulative_balance": trade.get("cumulative_balance", 0),
+            "cum_profit": trade.get("cum_profit", 0),
+            "return": trade.get("return_data", 0),
+            "profitandloss": trade.get("profitandloss", ""),
+            "position_size": trade.get("position_size", 0),
+            "per_pip_value": trade.get("per_pip_value", 0),
+            "pip": trade.get("pip", 0),
+            "swap_per_days": trade.get("swap_per_days", 0),
+            "value": trade.get("value", 0),
+            "adj": trade.get("adj", 0),
+            "adjisted_swap": trade.get("adjisted_swap", 0),
+            "month": trade.get("month", ""),
+            "month_profit": trade.get("month_profit", "")
+        }
+
+        # =========================
+        # ✅ EDIT OR INSERT
+        # =========================
         if incoming_trade_id:
-            # ── EDIT mode: find by trade_id and update in-place ──
+            # EDIT
             match_index = next(
                 (i for i, t in enumerate(trades)
                  if t.get("trade_id") == incoming_trade_id),
                 None
             )
+
             if match_index is None:
                 return JSONResponse(
                     {"Error": f"Trade with id '{incoming_trade_id}' not found"},
                     status_code=404
                 )
-            updated_trade = {
-                "trade_id": incoming_trade_id,  # keep same id
-                "date": trade_date,
-                "type": trade["type"],
-                "symbol": trade["symbol"],
-                "lot_size": trade["lot_size"],
-                "open": trade["open_price"],
-                "close": trade["close_price"],
-                "swap": trade.get("swap", 0),
-                "pnl": trade["profit_loss"]
-            }
-            trades[match_index] = updated_trade
+
+            trades[match_index] = trade_data
+
         else:
-            # ── INSERT mode: generate new trade_id and prepend ──
-            new_trade = {
-                "trade_id": "TRD-" + uuid.uuid4().hex[:8].upper(),
-                "date": trade_date,
-                "type": trade["type"],
-                "symbol": trade["symbol"],
-                "lot_size": trade["lot_size"],
-                "open": trade["open_price"],
-                "close": trade["close_price"],
-                "swap": trade.get("swap", 0),
-                "pnl": trade["profit_loss"]
-            }
-            trades.insert(0, new_trade)
+            # INSERT
+            trades.insert(0, trade_data)
 
-        # Recalculate summary from all trades
-        total_pnl = sum(t.get("pnl", 0) for t in trades)
-        total_swap = sum(t.get("swap", 0) for t in trades)
-        total_trades = len(trades)
-        winning_trades = sum(1 for t in trades if t.get("pnl", 0) > 0)
-        losing_trades = sum(1 for t in trades if t.get("pnl", 0) < 0)
-
-        # Rebuild chart in date order
+        # =========================
+        # ✅ CHART CALCULATION ONLY
+        # =========================
         sorted_trades = sorted(trades, key=lambda x: x["date"])
+
         running_pnl = 0
         chart = []
+
         for t in sorted_trades:
             running_pnl += t.get("pnl", 0)
             return_pct = (running_pnl / capital) * 100 if capital else 0
+
             chart.append({
                 "date": t["date"],
-                "return": round(return_pct, 2)
+                "return": trade.get("return_data", 0)
             })
 
+        # =========================
+        # ✅ UPDATE PAYLOAD (NO SUMMARY)
+        # =========================
         update_payload = {
             "trades": trades,
             "chart": chart,
-            "summary": {
-                "total_pnl": round(total_pnl, 2),
-                "total_swap": round(total_swap, 2),
-                "total_trades": total_trades,
-                "winning_trades": winning_trades,
-                "losing_trades": losing_trades
-            },
             "updated_at": datetime.now(timezone.utc)
         }
 
@@ -253,8 +233,8 @@ async def update_trading_summary(data: TradeCreate):
             {"account_id": trade["account_id"]},
             {
                 "$set": update_payload,
+                "$unset": {"summary": ""},  # ❌ REMOVE summary
                 "$setOnInsert": {
-                    # Only fires when creating a NEW document
                     "account_id": trade["account_id"],
                     "capital": capital,
                     "created_at": datetime.now(timezone.utc)
@@ -263,13 +243,10 @@ async def update_trading_summary(data: TradeCreate):
             upsert=True
         )
 
-        updated_doc = await summary_trading_collection.find_one(
-            {"account_id": trade["account_id"]}
-        )
+       
 
         return JSONResponse({
-            "Success": "Trade updated & summary recalculated",
-            "data": fix_id(updated_doc)
+            "Success": "Trade updated successfully"
         }, status_code=200)
 
     except Exception as e:
@@ -281,8 +258,6 @@ async def update_trading_summary(data: TradeCreate):
 # =========================
 # 🔹 VIEW TRADING SUMMARY
 # =========================
-class AccountRequest(BaseModel):
-    account_id: str
 
 
 @router.post("/view_trading_summary")
@@ -313,7 +288,9 @@ async def view_trading_summary(mod: AccountRequest):
 @router.post("/delete_trade")
 async def delete_trade(payload: TradeDelete):
     try:
-        existing = await summary_trading_collection.find_one({"account_id": payload.account_id})
+        existing = await summary_trading_collection.find_one({
+            "account_id": payload.account_id
+        })
 
         if not existing:
             return JSONResponse({
@@ -323,9 +300,10 @@ async def delete_trade(payload: TradeDelete):
         trades = existing.get("trades", [])
         capital = existing.get("capital", 0)
 
+        # ✅ DELETE USING trade_id
         updated_trades = [
             t for t in trades
-            if not (t["date"] == payload.date and t["symbol"] == payload.symbol)
+            if t.get("trade_id") != payload.trade_id
         ]
 
         if len(updated_trades) == len(trades):
@@ -333,54 +311,50 @@ async def delete_trade(payload: TradeDelete):
                 "Error": "Trade not found"
             }, status_code=400)
 
-        # Recalculate summary
-        total_pnl = sum(t.get("pnl", 0) for t in updated_trades)
-        total_swap = sum(t.get("swap", 0) for t in updated_trades)
-        total_trades = len(updated_trades)
-        winning_trades = len([t for t in updated_trades if t["pnl"] > 0])
-        losing_trades = len([t for t in updated_trades if t["pnl"] < 0])
-
-        # Rebuild chart using account capital
+        # =========================
+        # 📊 REBUILD CHART (optional)
+        # =========================
         running_pnl = 0
         chart = []
 
+        updated_trades.sort(key=lambda x: x.get("date", ""))
+
         for t in updated_trades:
             running_pnl += t.get("pnl", 0)
-            return_percent = (running_pnl / capital) * 100 if capital else 0
+
+            return_percent = (
+                (running_pnl / capital) * 100
+                if capital else 0
+            )
+
             chart.append({
-                "date": t["date"],
+                "date": t.get("date"),
                 "return": round(return_percent, 2)
             })
 
+        # =========================
+        # 💾 UPDATE DB (NO SUMMARY)
+        # =========================
         await summary_trading_collection.update_one(
             {"account_id": payload.account_id},
             {
                 "$set": {
                     "trades": updated_trades,
                     "chart": chart,
-                    "summary": {
-                        "total_pnl": round(total_pnl, 2),
-                        "total_swap": round(total_swap, 2),
-                        "total_trades": total_trades,
-                        "winning_trades": winning_trades,
-                        "losing_trades": losing_trades
-                    },
                     "updated_at": datetime.now(timezone.utc)
                 }
             }
         )
 
-        updated_doc = await summary_trading_collection.find_one(
-            {"account_id": payload.account_id}
-        )
+        updated_doc = await summary_trading_collection.find_one({
+            "account_id": payload.account_id
+        })
 
         return JSONResponse({
-            "Success": "Trade deleted & summary updated",
-            "data": fix_id(updated_doc)
+            "Success": "Trade deleted successfully"
         }, status_code=200)
 
     except Exception as e:
         return JSONResponse({
             "Error": str(e)
         }, status_code=500)
-''''''
