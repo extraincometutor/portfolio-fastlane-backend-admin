@@ -1,10 +1,11 @@
+
 from fastapi import APIRouter
 from database import summary_data_collection
 from datetime import datetime, timezone
 from utils.serialization import fix_id
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-from typing import List
+from typing import List, Optional
 
 router = APIRouter(prefix="/accounts", tags=["accounts"])
 
@@ -32,6 +33,7 @@ class SummaryDataCreate(BaseModel):
     capital: float
     closing_balance: float
     months: List[MonthData]
+    summary_id: Optional[str] = None  
 
 
 class AccountRequest(BaseModel):
@@ -125,6 +127,8 @@ def recalculate_opening_closing(capital: float, months: list) -> list:
 # =========================
 # 🔥 CREATE / UPDATE SUMMARY
 # =========================
+import uuid
+
 @router.post("/create_summary_data")
 async def create_summary_data(summary: SummaryDataCreate):
     try:
@@ -134,18 +138,35 @@ async def create_summary_data(summary: SummaryDataCreate):
 
         existing = await summary_data_collection.find_one({"account_id": account_id})
 
+        # =========================
+        # 🔥 ADD summary_id TO NEW MONTHS
+        # =========================
+        for m in new_months:
+            if "summary_id" not in m:
+                m["summary_id"] = "SUM-" + uuid.uuid4().hex[:8].upper()
+
         if existing:
             existing_months = existing.get("months", [])
             capital = existing.get("capital", data.get("capital", 0))
 
+            # Keep old summary_id if month exists
             months_map = {m["month"]: m for m in existing_months}
+
             for m in new_months:
+                if m["month"] in months_map:
+                    # preserve old summary_id
+                    m["summary_id"] = months_map[m["month"]].get("summary_id", str(uuid.uuid4()))
                 months_map[m["month"]] = m
+
             months = list(months_map.values())
+
         else:
             months = new_months
             capital = data.get("capital", 0)
 
+        # =========================
+        # 🔹 SORT + RECALCULATE
+        # =========================
         months = sort_months(months)
         months = recalculate_opening_closing(capital, months)
 
@@ -172,7 +193,7 @@ async def create_summary_data(summary: SummaryDataCreate):
         saved_data = await summary_data_collection.find_one({"account_id": account_id})
 
         return JSONResponse({
-            "Success": "Summary updated with correct totals",
+            "Success": "Summary updated with month summary_id",
             "data": fix_id(saved_data)
         }, status_code=200)
 
@@ -200,29 +221,61 @@ async def view_summary_data(request: AccountRequest):
 # =========================
 # 🔹 ADD / UPDATE A MONTH
 # =========================
+import uuid
+
 @router.post("/add_performance_month")
 async def add_performance_month(summary: SummaryDataCreate):
     try:
         data = summary.dict()
         account_id = data["account_id"]
-        new_month = data.get("months")[0]  # only 1 month input at a time
+        new_month = data.get("months")[0]
 
-        existing = await summary_data_collection.find_one({"account_id": account_id})
+        existing = await summary_data_collection.find_one({"account_id": account_id,"summary_id":data.get("summary_id")})
+
+        incoming_summary_id = new_month.get("summary_id")
+
+        # =========================
+        # 🔥 GENERATE ID IF NOT PROVIDED
+        # =========================
+        if not incoming_summary_id:
+            incoming_summary_id = "SUM-" + uuid.uuid4().hex[:8].upper()
+            new_month["summary_id"] = incoming_summary_id
 
         if existing:
             months = existing.get("months", [])
             capital = existing.get("capital", data.get("capital", 0))
+
+            found = False
+            updated_months = []
+
+            # =========================
+            # 🔁 STRICT MATCH BY summary_id
+            # =========================
+            for m in months:
+                if m.get("summary_id") == incoming_summary_id:
+                    # ✅ UPDATE ONLY THIS RECORD
+                    updated_months.append(new_month)
+                    found = True
+                else:
+                    updated_months.append(m)
+
+            # =========================
+            # ➕ ADD ONLY IF NOT FOUND
+            # =========================
+            if not found:
+                updated_months.append(new_month)
+
+            months = updated_months
+
         else:
-            months = []
             capital = data.get("capital", 0)
+            months = [new_month]
 
-        # Replace if same month exists, otherwise append
-        months = [m for m in months if m["month"] != new_month["month"]]
-        months.append(new_month)
-
+        # =========================
+        # 🔹 SORT + RECALCULATE
+        # =========================
         months = sort_months(months)
         months = recalculate_opening_closing(capital, months)
-
         totals = recalculate_totals(capital, months)
 
         updated_data = {
@@ -246,7 +299,7 @@ async def add_performance_month(summary: SummaryDataCreate):
         saved_data = await summary_data_collection.find_one({"account_id": account_id})
 
         return JSONResponse({
-            "Success": "Month added & totals updated",
+            "Success": "Handled strictly by summary_id",
             "data": fix_id(saved_data)
         }, status_code=200)
 
