@@ -54,7 +54,7 @@ async def create_trading_data(payload: TradeCreate):
             })
 
             return JSONResponse({
-                "Success": "Empty trading data created"
+                "Success": "Trading data stored successfully"
             }, status_code=200)
 
         # =========================
