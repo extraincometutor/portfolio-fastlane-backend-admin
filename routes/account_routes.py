@@ -173,23 +173,25 @@ def sort_months(months: list):
     )
 
 # =========================
-# 📊 RECALCULATE OPEN/CLOSE
+# 📊 AUTO CALC (ONLY FOR ADD)
 # =========================
 def recalculate_opening_closing(capital: float, months: list):
     running_balance = capital
 
     for m in months:
-        m["opening"] = running_balance
+        if "opening" not in m:
+            m["opening"] = running_balance
 
-        profit = m.get("net_profit", 0)
-        m["closing"] = running_balance + profit
+        if "closing" not in m:
+            profit = m.get("net_profit", 0)
+            m["closing"] = m["opening"] + profit
 
         running_balance = m["closing"]
 
     return months
 
 # =========================
-# 📊 RECALCULATE TOTALS
+# 📊 TOTALS
 # =========================
 def recalculate_totals(capital: float, months: list):
     total_profit = sum(m.get("net_profit", 0) for m in months)
@@ -197,7 +199,7 @@ def recalculate_totals(capital: float, months: list):
     profit_trades = sum(m.get("profit_trades", 0) for m in months)
 
     win_rate = (profit_trades / total_trades * 100) if total_trades > 0 else 0
-    closing_balance = capital + total_profit
+    closing_balance = months[-1]["closing"] if months else capital
 
     return {
         "closing_balance": closing_balance,
@@ -219,66 +221,44 @@ async def add_performance_month(summary: AddSummary):
         account_id = data["account_id"]
 
         # =========================
-        # 🔁 HANDLE FLEXIBLE INPUT
+        # INPUT
         # =========================
-        if data.get("months"):
-            new_month = data["months"][0]
-        else:
-            new_month = {
-                "month": data.get("month"),
-                "year": data.get("year"),
-                "net_profit": data.get("net_profit", 0),
-                "total_trades": data.get("total_trades", 0),
-                "profit_trades": data.get("profit_trades", 0),
-                "max_drawdown": data.get("max_drawdown", 0),
-                "profit_factor": data.get("profit_factor", 0),
-                "profit": data.get("profit", 0),
-                "loss": data.get("loss", 0),
-                "loss_ratio": data.get("loss_ratio", 0),
-            }
+        new_month = {
+            "month": data.get("month"),
+            "year": data.get("year"),
+            "net_profit": data.get("net_profit", 0),
+            "total_trades": data.get("total_trades", 0),
+            "profit_trades": data.get("profit_trades", 0),
+            "max_drawdown": data.get("max_drawdown", 0),
+            "profit_factor": data.get("profit_factor", 0),
+            "profit": data.get("profit", 0),
+            "loss": data.get("loss", 0),
+            "loss_ratio": data.get("loss_ratio", 0),
+            "opening": data.get("opening"),
+            "closing": data.get("closing"),
+        }
 
-        # =========================
-        # 🧹 CLEAN DATA
-        # =========================
         new_month = {k: v for k, v in new_month.items() if v is not None}
 
-        # ❌ REMOVE SYSTEM GENERATED FIELDS
-        for field in ["opening", "closing", "roi", "win_rate"]:
-            new_month.pop(field, None)
+        incoming_summary_id = data.get("summary_id")
 
-        # =========================
-        # 🔑 SUMMARY ID LOGIC
-        # =========================
-        incoming_summary_id = data.get("summary_id") or new_month.get("summary_id")
-
-        # =========================
-        # 🔍 FIND ACCOUNT
-        # =========================
-        existing = await summary_data_collection.find_one({
-            "account_id": account_id
-        })
+        existing = await summary_data_collection.find_one({"account_id": account_id})
 
         if existing:
             months = existing.get("months", [])
             capital = data.get("capital", existing.get("capital", 0))
 
-            found = False
             updated_months = []
+            found = False
 
             # =========================
-            # ✏️ EDIT LOGIC
+            # ✏️ EDIT (MANUAL MODE)
             # =========================
             if incoming_summary_id:
                 for m in months:
                     if m.get("summary_id") == incoming_summary_id:
-                        updated = m.copy()
-                        updated.update(new_month)
-
-                        # 🔒 prevent override
-                        updated.pop("opening", None)
-                        updated.pop("closing", None)
-
-                        updated["summary_id"] = m.get("summary_id")
+                        updated = {**m, **new_month}
+                        updated["summary_id"] = m["summary_id"]
 
                         updated_months.append(updated)
                         found = True
@@ -286,37 +266,42 @@ async def add_performance_month(summary: AddSummary):
                         updated_months.append(m)
 
                 if not found:
-                    return JSONResponse({
-                        "Error": "summary_id not found"
-                    }, status_code=404)
+                    return JSONResponse({"Error": "summary_id not found"}, status_code=404)
+
+                months = updated_months
 
             else:
                 # =========================
-                # ➕ ADD NEW MONTH
+                # ➕ ADD (AUTO MODE)
                 # =========================
                 new_id = "SUM-" + uuid.uuid4().hex[:8].upper()
                 new_month["summary_id"] = new_id
-                updated_months = months + [new_month]
-                incoming_summary_id = new_id
 
-            months = updated_months
+                months.append(new_month)
+                months = sort_months(months)
+                months = recalculate_opening_closing(capital, months)
 
         else:
             # =========================
-            # 🆕 FIRST TIME INSERT
+            # FIRST INSERT
             # =========================
             capital = data.get("capital", 0)
 
             new_id = "SUM-" + uuid.uuid4().hex[:8].upper()
             new_month["summary_id"] = new_id
+
+            # if no opening provided → default
+            if "opening" not in new_month:
+                new_month["opening"] = capital
+
+            if "closing" not in new_month:
+                new_month["closing"] = new_month["opening"] + new_month.get("net_profit", 0)
+
             months = [new_month]
-            incoming_summary_id = new_id
 
         # =========================
-        # 📊 SORT + RECALCULATE
+        # TOTALS
         # =========================
-        months = sort_months(months)
-        months = recalculate_opening_closing(capital, months)
         totals = recalculate_totals(capital, months)
 
         updated_data = {
@@ -328,26 +313,22 @@ async def add_performance_month(summary: AddSummary):
             "updated_at": datetime.now(timezone.utc)
         }
 
-        # =========================
-        # 💾 SAVE TO DB
-        # =========================
         await summary_data_collection.update_one(
             {"account_id": account_id},
             {
                 "$set": updated_data,
                 "$setOnInsert": {"created_at": datetime.now(timezone.utc)}
             },
-            upsert=True  # ✅ IMPORTANT
+            upsert=True
         )
 
         return JSONResponse({
-            "Success": "Data updated successfully",
+            "Success": "Manual edit applied",
             "summary_id": incoming_summary_id
-        }, status_code=200)
+        })
 
     except Exception as e:
         return JSONResponse({"Error": str(e)}, status_code=500)
-
 
 # =========================
 # 🔹 DELETE A MONTH
