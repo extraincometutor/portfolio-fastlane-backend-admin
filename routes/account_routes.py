@@ -28,10 +28,14 @@ def recalculate_totals(capital: float, months: list) -> dict:
         total_winning_trades += m.get("winning_trades", 0)
         total_profit += abs(m.get("profit_amount", 0))
         total_loss += abs(m.get("loss_amount", 0))
-
+        total_roi += m.get("roi", 0) if m.get("roi", 0) else 0
+        profit_factor += m.get("profit_factor", 0) if m.get("profit_factor", 0) else 0
+        profit_trades += m.get("profit_trades", 0) if m.get("profit_trades", 0) else 0
+        max_drawdown += m.get("max_drawdown", 0) if m.get("max_drawdown", 0) else 0
+        
     total_closing = capital + total_net_profit
 
-    total_roi = (total_net_profit / capital * 100) if capital else 0
+    #total_roi = (total_net_profit / capital * 100) if capital else 0
     win_rate = (total_winning_trades / total_trades * 100) if total_trades else 0
     profit_factor = (total_profit / total_loss) if total_loss else 0
     loss_ratio = (
@@ -62,7 +66,9 @@ def recalculate_totals(capital: float, months: list) -> dict:
             "total_trades": total_trades,
             "winning_trades": total_winning_trades,
             "win_rate": round(win_rate, 2),
+            "profit_factor": round(profit_factor, 2),
             "total_profit": round(total_profit, 2),
+            "profit": round(profit_trades, 2),
             "total_loss": round(total_loss, 2),
             "loss_ratio": round(loss_ratio, 2),
             "profit_factor": round(profit_factor, 2),
@@ -70,7 +76,6 @@ def recalculate_totals(capital: float, months: list) -> dict:
             "profit_loss_ratio": round((total_profit / total_loss), 2) if total_loss else 0
         }
     }
-
 
 MONTH_ORDER = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
                "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
@@ -190,26 +195,6 @@ def recalculate_opening_closing(capital: float, months: list):
 
     return months
 
-# =========================
-# 📊 TOTALS
-# =========================
-def recalculate_totals(capital: float, months: list):
-    total_profit = sum(m.get("net_profit", 0) for m in months)
-    total_trades = sum(m.get("total_trades", 0) for m in months)
-    profit_trades = sum(m.get("profit_trades", 0) for m in months)
-
-    win_rate = (profit_trades / total_trades * 100) if total_trades > 0 else 0
-    closing_balance = months[-1]["closing"] if months else capital
-
-    return {
-        "closing_balance": closing_balance,
-        "totals": {
-            "total_profit": total_profit,
-            "total_trades": total_trades,
-            "profit_trades": profit_trades,
-            "win_rate": round(win_rate, 2)
-        }
-    }
 
 # =========================
 # 🚀 MAIN API
