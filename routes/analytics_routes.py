@@ -149,8 +149,11 @@ async def update_trading_summary(data: TradeUpdate):
         cum_profit = previous_cum_profit + current_pnl
         trade["cum_profit"] = cum_profit    
 
+        month_profits = trade.get("month_profit", "")
+        profit_loss_type = trade.get("profitandloss", "")
 
-
+        month_profit = f"{month_profits}{profit_loss_type}"
+        
         # =========================
         # ✅ COMMON TRADE OBJECT
         # =========================
@@ -166,7 +169,7 @@ async def update_trading_summary(data: TradeUpdate):
             "pnl": trade["profit_loss"],
             "max_drawdown": trade.get("max_drawdown", 0),
             "cumulative_balance": trade.get("cumulative_balance", 0),
-            "cum_profit": trade.get("cum_profit", 0),
+            "cum_profit": cum_profit,
             "return": trade.get("return_data", 0),
             "profitandloss": trade.get("profitandloss", ""),
             "position_size": trade.get("position_size", 0),
@@ -177,7 +180,7 @@ async def update_trading_summary(data: TradeUpdate):
             "adj": trade.get("adj", 0),
             "adjisted_swap": trade.get("adjisted_swap", 0),
             "month": trade.get("month", ""),
-            "month_profit": trade.get("month_profit", "")
+            "month_profit": month_profit
         }
 
         # =========================
@@ -194,7 +197,7 @@ async def update_trading_summary(data: TradeUpdate):
             if match_index is None:
                 return JSONResponse(
                     {"Error": f"Trade with id '{incoming_trade_id}' not found"},
-                    status_code=404
+                    status_code=400
                 )
 
             trades[match_index] = trade_data
