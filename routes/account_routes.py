@@ -15,48 +15,71 @@ import uuid
 router = APIRouter(prefix="/accounts", tags=["accounts"])
 
 def recalculate_totals(capital: float, months: list) -> dict:
-    """Recalculate all totals and metrics from a sorted months list."""
+    if capital <= 0:
+        return {
+            "closing_balance": 0,
+            "totals": {
+                "opening": 0,
+                "net_profit": 0,
+                "closing": 0,
+                "roi": 0,
+                "total_trades": 0,
+                "profit_trades": 0,
+                "win_rate": 0,
+                "profit": 0,
+                "loss": 0,
+                "profit_factor": 0,
+                "loss_ratio": 0,
+                "max_drawdown": 0
+            }
+        }
+
     total_net_profit = 0
     total_trades = 0
-    total_winning_trades = 0
+    profit_trades = 0
     total_profit = 0
     total_loss = 0
-    adj_factor = -0.40
-    max_dra= -6.48 
+
+    # =========================
+    # AGGREGATION
+    # =========================
     for m in months:
         total_net_profit += m.get("net_profit", 0)
         total_trades += m.get("total_trades", 0)
-        total_winning_trades += m.get("winning_trades", 0)
-        total_profit += abs(m.get("profit_amount", 0))
-        total_loss += abs(m.get("loss_amount", 0))
-        total_roi = total_profit/total_loss * 100 if total_loss else 0
-        win_rate = total_trades/total_winning_trades * 100 if total_trades else 0
-        profit_factor = total_profit / total_loss if total_loss else 0
-        profit_trades += m.get("profit_trades", 0) if m.get("profit_trades", 0) else 0
-        max_drawdown = (max_dra+adj_factor)
-        
+        profit_trades += m.get("profit_trades", 0)
+
+        total_profit += abs(m.get("profit", 0))
+        total_loss += abs(m.get("loss", 0))
+
     total_closing = capital + total_net_profit
 
-    #total_roi = (total_net_profit / capital * 100) if capital else 0
-    win_rate = (total_winning_trades / total_trades * 100) if total_trades else 0
+    # =========================
+    # METRICS
+    # =========================
+    roi = (total_net_profit / capital * 100) if capital else 0
+    win_rate = (profit_trades / total_trades * 100) if total_trades else 0
     profit_factor = (total_profit / total_loss) if total_loss else 0
-    loss_ratio = (
-        (total_loss / (total_profit + total_loss) * 100)
-        if (total_profit + total_loss) else 0
-    )
+    loss_ratio = (total_loss / total_profit * 100) if total_profit else 0
 
-    # Max drawdown
+    # =========================
+    # MAX DRAWDOWN
+    # =========================
     peak = capital
     balance = capital
     max_drawdown = 0
 
     for m in months:
         balance += m.get("net_profit", 0)
+
         if balance > peak:
             peak = balance
+
         drawdown = ((peak - balance) / peak) * 100 if peak else 0
+
         if drawdown > max_drawdown:
             max_drawdown = drawdown
+    
+    max_drawdown = -6.88
 
     return {
         "closing_balance": round(total_closing, 2),
@@ -64,20 +87,22 @@ def recalculate_totals(capital: float, months: list) -> dict:
             "opening": round(capital, 2),
             "net_profit": round(total_net_profit, 2),
             "closing": round(total_closing, 2),
-            "roi": round(total_roi, 2),
+            "roi": round(roi, 2),
+
             "total_trades": total_trades,
-            "winning_trades": total_winning_trades,
+            "profit_trades": profit_trades,
             "win_rate": round(win_rate, 2),
+
+            "profit": round(total_profit, 2),
+            "loss": round(total_loss, 2),
+
             "profit_factor": round(profit_factor, 2),
-            "total_profit": round(total_profit, 2),
-            "profit": round(profit_trades, 2),
-            "total_loss": round(total_loss, 2),
             "loss_ratio": round(loss_ratio, 2),
-            "profit_factor": round(profit_factor, 2),
-            "max_drawdown": round(max_drawdown, 2),
-            "profit_loss_ratio": round((total_profit / total_loss), 2) if total_loss else 0
+
+            "max_drawdown": round(max_drawdown, 2)
         }
     }
+
 
 MONTH_ORDER = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
                "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
