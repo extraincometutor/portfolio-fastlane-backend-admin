@@ -151,6 +151,8 @@ async def insert_summary_data():
             "total_trades": 24,
             "profit_trades": 17,
             "profit": 37061.42,
+            "win_rate": 70.8,
+            "roi": 29.24,
             "loss": -7824.02,
             "summary_id": "SUM-" + uuid.uuid4().hex[:8].upper()
         },
@@ -161,6 +163,8 @@ async def insert_summary_data():
             "total_trades": 19,
             "profit_trades": 12,
             "profit": 38601.53,
+            "win_rate": 63.16,
+            "roi": 23.80,
             "loss": -7860.69,
             "summary_id": "SUM-" + uuid.uuid4().hex[:8].upper()
         },
@@ -171,6 +175,8 @@ async def insert_summary_data():
             "total_trades": 24,
             "profit_trades": 16,
             "profit": 76255.44,
+            "win_rate": 66.67,
+            "roi": 31.40,
             "loss": -26000.63,
             "summary_id": "SUM-" + uuid.uuid4().hex[:8].upper()
         },
@@ -181,6 +187,8 @@ async def insert_summary_data():
             "total_trades": 30,
             "profit_trades": 20,
             "profit": 104511.28,
+            "win_rate": 66.67,
+            "roi": 30.70,
             "loss": -39967.47,
             "summary_id": "SUM-" + uuid.uuid4().hex[:8].upper()
         },
@@ -191,6 +199,8 @@ async def insert_summary_data():
             "total_trades": 21,
             "profit_trades": 15,
             "profit": 95972.72,
+            "win_rate": 71.43,
+            "roi": 30.10,
             "loss": -13160.43,
             "summary_id": "SUM-" + uuid.uuid4().hex[:8].upper()
         }

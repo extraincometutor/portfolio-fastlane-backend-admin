@@ -244,6 +244,8 @@ async def add_performance_month(summary: AddSummary):
             "max_drawdown": data.get("max_drawdown", 0),
             "profit_factor": data.get("profit_factor", 0),
             "profit": data.get("profit", 0),
+            "win_rate": data.get("win_rate", 0),
+            "roi": data.get("roi", 0),
             "loss": data.get("loss", 0),
             "loss_ratio": data.get("loss_ratio", 0),
             "opening": data.get("opening"),
