@@ -149,10 +149,16 @@ async def update_trading_summary(data: TradeUpdate):
         cum_profit = previous_cum_profit + current_pnl
         trade["cum_profit"] = cum_profit    
 
-        month_profits = trade.get("month", "")
+
+
+        month_name = trade.get("month") or datetime.strptime(trade_date, "%Y-%m-%d").strftime("%b")
         profit_loss_type = trade.get("profitandloss", "")
 
-        month_profit = f"{month_profits}{profit_loss_type}"
+        #month_profit = f"{month_name}{profit_loss_type}"
+        #month_profits = trade.get("month", "")
+        profit_loss_type = trade.get("profitandloss", "")
+
+        month_profit = f"{month_name}{profit_loss_type}"
         
         # =========================
         # ✅ COMMON TRADE OBJECT
