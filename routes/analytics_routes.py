@@ -149,7 +149,7 @@ async def update_trading_summary(data: TradeUpdate):
         cum_profit = previous_cum_profit + current_pnl
         trade["cum_profit"] = cum_profit    
 
-        month_profits = trade.get("month_profit", "")
+        month_profits = trade.get("month", "")
         profit_loss_type = trade.get("profitandloss", "")
 
         month_profit = f"{month_profits}{profit_loss_type}"
