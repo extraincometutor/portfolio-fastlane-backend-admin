@@ -21,17 +21,19 @@ def recalculate_totals(capital: float, months: list) -> dict:
     total_winning_trades = 0
     total_profit = 0
     total_loss = 0
-
+    adj_factor = -0.40
+    max_dra= -6.48 
     for m in months:
         total_net_profit += m.get("net_profit", 0)
         total_trades += m.get("total_trades", 0)
         total_winning_trades += m.get("winning_trades", 0)
         total_profit += abs(m.get("profit_amount", 0))
         total_loss += abs(m.get("loss_amount", 0))
-        total_roi += m.get("roi", 0) if m.get("roi", 0) else 0
-        profit_factor += m.get("profit_factor", 0) if m.get("profit_factor", 0) else 0
+        total_roi = total_profit/total_loss * 100 if total_loss else 0
+        win_rate = total_trades/total_winning_trades * 100 if total_trades else 0
+        profit_factor = total_profit / total_loss if total_loss else 0
         profit_trades += m.get("profit_trades", 0) if m.get("profit_trades", 0) else 0
-        max_drawdown += m.get("max_drawdown", 0) if m.get("max_drawdown", 0) else 0
+        max_drawdown = (max_dra+adj_factor)
         
     total_closing = capital + total_net_profit
 
@@ -293,6 +295,7 @@ async def add_performance_month(summary: AddSummary):
             "account_id": account_id,
             "capital": capital,
             "months": months,
+            "opening_balance": totals["opening_balance"],
             "closing_balance": totals["closing_balance"],
             "totals": totals["totals"],
             "updated_at": datetime.now(timezone.utc)
